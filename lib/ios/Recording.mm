@@ -1,11 +1,16 @@
 #import "Recording.h"
 
+using namespace facebook;
+
 @implementation Recording {
     AudioQueueRef _queue;
     AudioQueueBufferRef _buffer;
     NSNumber *_audioData[65536];
     UInt32 _bufferSize;
 }
+
+@synthesize bridge = _bridge;
+@synthesize methodQueue = _methodQueue;
 
 void inputCallback(
         void *inUserData,
@@ -18,6 +23,42 @@ void inputCallback(
 }
 
 RCT_EXPORT_MODULE()
+
++ (BOOL)requiresMainQueueSetup {
+    return YES;
+}
+
+static jsi::Array cconvertNSArrayToJSIArray(jsi::Runtime &runtime, NSArray *value)
+{
+    jsi::Array result = jsi::Array(runtime, value.count);
+    for (size_t i = 0; i < value.count; i++) {
+        result.setValueAtIndex(runtime, i, jsi::Value([value[i] doubleValue]));
+    }
+    return result;
+}
+
+- (void)setBridge:(RCTBridge *)bridge
+{
+    _bridge = bridge;
+    _setBridgeOnMainQueue = RCTIsMainQueue();
+
+    RCTCxxBridge *cxxBridge = (RCTCxxBridge *)self.bridge;
+    if (!cxxBridge.runtime) {
+        return;
+    }
+
+    setup(*(jsi::Runtime *)cxxBridge.runtime);
+}
+
+
+static void testSend(jsi::Runtime & jsiRuntime, jsi::Array & data)
+{
+    if (jsiRuntime.global().hasProperty(jsiRuntime, "testRecordingListener")) {
+        auto ob = jsiRuntime.global().getPropertyAsFunction(jsiRuntime, "testRecordingListener").call(
+                                                                                           jsiRuntime,
+                                                                                           data);
+    }
+}
 
 RCT_EXPORT_METHOD(init:(NSDictionary *) options) {
     UInt32 bufferSize = options[@"bufferSize"] == nil ? 8192 : [options[@"bufferSize"] unsignedIntegerValue];
@@ -48,12 +89,21 @@ RCT_EXPORT_METHOD(stop) {
 }
 
 - (void)processInputBuffer:(AudioQueueBufferRef)inBuffer queue:(AudioQueueRef)queue {
-    SInt16 *audioData = inBuffer->mAudioData;
+    SInt16 *audioData = (SInt16*) inBuffer->mAudioData;
     UInt32 count = inBuffer->mAudioDataByteSize / sizeof(SInt16);
     for (int i = 0; i < _bufferSize; i++) {
         _audioData[i] = @(audioData[i]);
     }
-    [self sendEventWithName:@"recording" body:[NSArray arrayWithObjects:_audioData count:count]];
+
+    RCTCxxBridge *cxxBridge = (RCTCxxBridge *)self.bridge;
+
+    if (!cxxBridge.runtime) {
+        [self sendEventWithName:@"recording" body:[NSArray arrayWithObjects:_audioData count:count]];
+    } else {
+        jsi::Array arr = cconvertNSArrayToJSIArray(*(jsi::Runtime *)cxxBridge.runtime, [NSArray arrayWithObjects:_audioData count:count]);
+        testSend(*(jsi::Runtime *)cxxBridge.runtime, arr);
+    }
+
     AudioQueueEnqueueBuffer(queue, inBuffer, 0, NULL);
 }
 

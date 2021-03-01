@@ -11,7 +11,7 @@ Pod::Spec.new do |s|
   s.license      = { :type => package['license']}
   s.platform     = :ios, '9.0'
   s.source       = { :git => package['repository']['url'] }
-  s.source_files = '**/*.{h,m}'
+  s.source_files = '**/*.{h,m,mm}'
 
   s.dependency 'React'
 end
